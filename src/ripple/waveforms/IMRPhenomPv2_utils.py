@@ -374,7 +374,7 @@ def phP_get_fRD_fdamp(m1, m2, chi1_l, chi2_l, chip):
 
     return fRD / M_s, fdamp / M_s
 
-def spline_f_final(m1, m2, lambda1, lambda2, nrtidal=False)
+def spline_f_final(m1, m2, lambda1, lambda2, nrtidal=False):
     total_mass = m1 + m2
     q = m1 / m2
     n_fixed = 10
@@ -387,10 +387,6 @@ def spline_f_final(m1, m2, lambda1, lambda2, nrtidal=False)
         freqs_fixed = jnp.linspace(freqs_fixed_start, freqs_fixed_stop, n_fixed)
 
         phi_tidal_fixed, planck_taper_fixed = get_nr_tuned_tidal_phase_taper(freqs_fixed, m1, m2, lambda1, lambda2)
-    else:
-        raise NotImplementedError("Only NRTidal is implemented")
-
-    
     else:
         raise NotImplementedError("Only NRTidal is implemented")
 
