@@ -6,8 +6,8 @@ from ..constants import gt, MSUN
 import numpy as np
 from .IMRPhenomD import Phase as PhDPhase
 from .IMRPhenomD import Amp as PhDAmp
-from .IMRPhenomD_utils import get_coeffs
-from .NRTidal import get_nr_tuned_tidal_phase_taper
+from .IMRPhenomD_utils import get_coeffs, get_coeffs_nrtidal
+from .NRTidal import get_nr_tuned_tidal_phase_taper, get_kappa2T, get_merger_frequency
 
 from ..typing import Array
 from .IMRPhenomPv2_utils import *
@@ -305,18 +305,14 @@ def gen_IMRPhenomPv2(
     Y2 = [Y2m2, Y2m1, Y20, Y21, Y22]
 
     # Shift phase so that peak amplitude matches t = 0
-    theta_intrinsic = jnp.array([m2, m1, chi2_l, chi1_l])
-    coeffs = get_coeffs(theta_intrinsic)
 
-    # For BNS the final frequency is not the same as BBHs
     if nrtidal:
-        raise NotImplementedError
-    else:
+        # theta_intrinsic = jnp.array([m2, m1, chi2_l, chi1_l, lambda1, lambda2])
+        theta_intrinsic = jnp.array([m2, m1, chi2_l, chi1_l])
+        coeffs = get_coeffs(theta_intrinsic)
         transition_freqs = phP_get_transition_frequencies(
             theta_intrinsic, coeffs[5], coeffs[6], chip
         )
-
-    if nrtidal:
         hPhenomDs, phi_IIb = PhenomPOneFrequencyWithTides(
             fs,
             m2,
@@ -333,6 +329,11 @@ def gen_IMRPhenomPv2(
             transition_freqs,
         )
     else:
+        theta_intrinsic = jnp.array([m2, m1, chi2_l, chi1_l])
+        coeffs = get_coeffs(theta_intrinsic)
+        transition_freqs = phP_get_transition_frequencies(
+            theta_intrinsic, coeffs[5], coeffs[6], chip
+        )
         hPhenomDs, phi_IIb = PhenomPOneFrequency(
             fs,
             m2,
@@ -362,15 +363,22 @@ def gen_IMRPhenomPv2(
         alphaNNLOoffset - alpha0,
         epsilonNNLOoffset,
     )
-    # unpack transition_freqs
+
     # for BNS the final frequency is not the same as BBHs
     # so the time shift that needs to be applied is different
-    _, _, _, _, f_RD, _ = transition_freqs
+    if nrtidal and (lambda1 != 0.0 and lambda2 != 0.0):
+        kappa2T = get_kappa2T(m1, m2, lambda1, lambda2)
+        f_merger = get_merger_frequency(M, kappa2T, q)
+        f_final = f_merger
+    else:
+        # unpack transition_freqs
+        _, _, _, _, f_RD, _ = transition_freqs
+        f_final = f_RD
 
     # phi_IIb = lambda f: PhenomPOneFrequency_phase(
     #     f, m2, m1, chi2_l, chi1_l, chip, phiRef, M, dist_mpc
     # )
-    t0 = jax.grad(phi_IIb)(f_RD) / (2 * jnp.pi)
+    t0 = jax.grad(phi_IIb)(f_final) / (2 * jnp.pi)
     phase_corr = jnp.cos(2 * jnp.pi * fs * (t0)) - 1j * jnp.sin(2 * jnp.pi * fs * (t0))
     M_s = (m1 + m2) * gt
     phase_corr_tc = jnp.exp(-1j * fs * M_s * tc)
