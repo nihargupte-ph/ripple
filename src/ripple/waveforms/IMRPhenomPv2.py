@@ -7,6 +7,7 @@ import numpy as np
 from .IMRPhenomD import Phase as PhDPhase
 from .IMRPhenomD import Amp as PhDAmp
 from .IMRPhenomD_utils import get_coeffs
+from .NRTidal import get_nr_tuned_tidal_phase_taper
 
 from ..typing import Array
 from .IMRPhenomPv2_utils import *
@@ -144,6 +145,56 @@ def PhenomPOneFrequency(
     return hPhenom, Dphi
 
 
+def PhenomPOneFrequencyWithTides(
+    fs,
+    m1,
+    m2,
+    chi1,
+    chi2,
+    chip,
+    lambda1,
+    lambda2,
+    phic,
+    M,
+    dist_mpc,
+    coeffs,
+    transition_freqs,
+):
+    """
+    m1, m2: in solar masses
+    phic: Orbital phase at the peak of the underlying non precessing model (rad)
+    M: Total mass (Solar masses)
+    """
+    # These are the parametrs that go into the waveform generator
+    # Note that JAX does not give index errors, so if you pass in the
+    # the wrong array it will behave strangely
+    norm = 2.0 * jnp.sqrt(5.0 / (64.0 * jnp.pi))
+    theta_ripple = jnp.array([m1, m2, chi1, chi2])
+    # coeffs = get_coeffs(theta_ripple)
+    # transition_freqs = phP_get_transition_frequencies(
+    #     theta_ripple, coeffs[5], coeffs[6], chip
+    # )
+
+    # NOTE these coeffs might be different...
+    phase = PhDPhase(fs, theta_ripple, coeffs, transition_freqs)
+    Dphi = lambda f: -PhDPhase(f, theta_ripple, coeffs, transition_freqs)
+
+    phase -= phic
+    Amp = PhDAmp(fs, theta_ripple, coeffs, transition_freqs, D=dist_mpc) / norm
+
+    # getting amplitude and phase terms
+    # NOTE NOTEIMPLMENTED amplitude correction is 1 for NRTidalV1
+    ampTidal = 0.0
+    # NOTE NOTEIMPLMENTED amplitude correction is 1 for NRTidalV1
+    phaseTidal, planckTaper = get_nr_tuned_tidal_phase_taper(
+        fs, m1, m2, lambda1, lambda2
+    )
+
+    hPhenom = Amp * jnp.exp(-1j * (phase + phaseTidal)) * planckTaper
+
+    return hPhenom, Dphi
+
+
 # def PhenomPOneFrequency_phase(
 #     f: float,
 #     m1: float,
@@ -170,12 +221,31 @@ def gen_IMRPhenomPv2(
     fs: Array,
     theta: Array,
     f_ref: float,
+    nrtidal=False,
 ):
     """
     Thetas are waveform parameters.
     m1 must be larger than m2.
     """
-    m1, m2, s1x, s1y, s1z, s2x, s2y, s2z, dist_mpc, tc, phiRef, incl = theta
+    if nrtidal:
+        (
+            m1,
+            m2,
+            s1x,
+            s1y,
+            s1z,
+            s2x,
+            s2y,
+            s2z,
+            dist_mpc,
+            tc,
+            phiRef,
+            incl,
+            lambda1,
+            lambda2,
+        ) = theta
+    else:
+        m1, m2, s1x, s1y, s1z, s2x, s2y, s2z, dist_mpc, tc, phiRef, incl = theta
 
     # flip m1 m2. For some reason LAL uses this convention for PhenomPv2
     m1, m2 = m2, m1
@@ -238,13 +308,44 @@ def gen_IMRPhenomPv2(
     theta_intrinsic = jnp.array([m2, m1, chi2_l, chi1_l])
     coeffs = get_coeffs(theta_intrinsic)
 
-    transition_freqs = phP_get_transition_frequencies(
-        theta_intrinsic, coeffs[5], coeffs[6], chip
-    )
+    # For BNS the final frequency is not the same as BBHs
+    if nrtidal:
+        raise NotImplementedError
+    else:
+        transition_freqs = phP_get_transition_frequencies(
+            theta_intrinsic, coeffs[5], coeffs[6], chip
+        )
 
-    hPhenomDs, phi_IIb = PhenomPOneFrequency(
-        fs, m2, m1, chi2_l, chi1_l, chip, phic, M, dist_mpc, coeffs, transition_freqs
-    )
+    if nrtidal:
+        hPhenomDs, phi_IIb = PhenomPOneFrequencyWithTides(
+            fs,
+            m2,
+            m1,
+            chi2_l,
+            chi1_l,
+            chip,
+            lambda1,
+            lambda2,
+            phic,
+            M,
+            dist_mpc,
+            coeffs,
+            transition_freqs,
+        )
+    else:
+        hPhenomDs, phi_IIb = PhenomPOneFrequency(
+            fs,
+            m2,
+            m1,
+            chi2_l,
+            chi1_l,
+            chip,
+            phic,
+            M,
+            dist_mpc,
+            coeffs,
+            transition_freqs,
+        )
 
     hp, hc = PhenomPCoreTwistUp(
         fs,
@@ -262,6 +363,8 @@ def gen_IMRPhenomPv2(
         epsilonNNLOoffset,
     )
     # unpack transition_freqs
+    # for BNS the final frequency is not the same as BBHs
+    # so the time shift that needs to be applied is different
     _, _, _, _, f_RD, _ = transition_freqs
 
     # phi_IIb = lambda f: PhenomPOneFrequency_phase(

@@ -15,6 +15,7 @@ from .IMRPhenomD_utils import (
 )
 from ..typing import Array
 from .IMRPhenomD_QNMdata import QNMData_a, QNMData_fRD, QNMData_fdamp
+from .NRTidal import get_kappa2T, get_merger_frequency, get_nr_tuned_tidal_phase_taper
 
 
 # helper functions for LALtoPhenomP:
@@ -372,6 +373,27 @@ def phP_get_fRD_fdamp(m1, m2, chi1_l, chi2_l, chip):
     fdamp = jnp.interp(finspin, QNMData_a, QNMData_fdamp) / (1.0 - Erad)
 
     return fRD / M_s, fdamp / M_s
+
+def spline_f_final(m1, m2, lambda1, lambda2, nrtidal=False)
+    total_mass = m1 + m2
+    q = m1 / m2
+    n_fixed = 10
+    if nrtidal:
+        # merger frequency is final frequency for BNS
+        kappa2T = get_kappa2T(m1, m2, lambda1, lambda2)
+        f_final = get_merger_frequency(kappa2T, total_mass, q)
+        freqs_fixed_start = 0.8 * f_final
+        freqs_fixed_stop = 1.2 * f_final
+        freqs_fixed = jnp.linspace(freqs_fixed_start, freqs_fixed_stop, n_fixed)
+
+        phi_tidal_fixed, planck_taper_fixed = get_nr_tuned_tidal_phase_taper(freqs_fixed, m1, m2, lambda1, lambda2)
+    else:
+        raise NotImplementedError("Only NRTidal is implemented")
+
+    
+    else:
+        raise NotImplementedError("Only NRTidal is implemented")
+
 
 
 def phP_get_transition_frequencies(
