@@ -6,7 +6,7 @@ from ..constants import gt, MSUN
 import numpy as np
 from .IMRPhenomD import Phase as PhDPhase
 from .IMRPhenomD import Amp as PhDAmp
-from .IMRPhenomD_utils import get_coeffs, get_coeffs_nrtidal
+from .IMRPhenomD_utils import get_coeffs
 from .NRTidal import get_nr_tuned_tidal_phase_taper, get_kappa2T, get_merger_frequency
 
 from ..typing import Array

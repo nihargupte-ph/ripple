@@ -136,6 +136,7 @@ def get_transition_frequencies(
 @jax.jit
 def get_coeffs(theta: Array) -> Array:
     # Retrives the coefficients needed to produce the waveform
+
     m1, m2, chi1, chi2 = theta
     m1_s = m1 * gt
     m2_s = m2 * gt
@@ -173,12 +174,6 @@ def get_coeffs(theta: Array) -> Array:
 
     # FIXME: Change to dictionary lookup
     return coeff
-
-
-@jax.jit
-def get_coeffs_nrtidal(theta: Array) -> Array:
-    theta_masses_spins = theta[:4]
-    lambda1, lambda2 = theta[4:]
 
 
 def get_delta0(f1, f2, f3, v1, v2, v3, d1, d3):
