@@ -7,12 +7,110 @@ import numpy as np
 from .IMRPhenomD import Phase as PhDPhase
 from .IMRPhenomD import Amp as PhDAmp
 from .IMRPhenomD_utils import get_coeffs
-from .IMRPhenom_tidal_utils import get_nr_tuned_tidal_phase_taper, get_kappa, get_merger_frequency
+from .IMRPhenomD_NRTidalv2 import get_planck_taper, _get_merger_frequency
+from .IMRPhenom_tidal_utils import get_kappa
 
 from ..typing import Array
 from .IMRPhenomPv2_utils import *
 from .IMRPhenomD_utils import *
 
+def get_tidal_phase(fHz, Xa, Xb, total_mass, kappa):
+    """ 
+    Computes the tidal phase from the NRTidalv1 model. 
+
+    Parameters
+    ----------
+    fHz : jnp.array[float64]
+        Array of frequencies in Hz.
+    Xa : jnp.array[float64]
+        Mass/total_mass of first object
+    Xb : jnp.array[float64]
+        Mass/total_mass of second object
+    total_mass : jnp.array[float64]
+        Total mass of binary system
+    kappa : jnp.array[float64]
+        Tidal coupling constant
+        
+    Returns
+    ------- 
+    tidal_phase : jnp.array[float64]
+        Tidal phase from NRTidalv1 model
+    """
+    # Constants
+    c_Newt = 2.4375
+    n_1 = -17.428
+    n_3over2 = 31.867
+    n_2 = -26.414
+    n_5over2 = 62.362
+    d_1 = n_1 - 2.496
+    d_3over2 = 36.089
+
+    # Dimensionless angular GW frequency
+    M_omega = jnp.pi * fHz * (total_mass * gt)
+
+    # Calculating powers of the frequency term
+    PN_x = jnp.power(M_omega, 2.0 / 3.0)
+    PN_x_3over2 = jnp.power(PN_x, 3.0 / 2.0)
+    PN_x_5over2 = jnp.power(PN_x, 5.0 / 2.0)
+
+    # Tidal phase calculation
+    tidal_phase = -kappa * c_Newt / (Xa * Xb) * PN_x_5over2
+
+    # Numerator and denominator for ratio
+    num = (
+        1.0
+        + (n_1 * PN_x)
+        + (n_3over2 * PN_x_3over2)
+        + (n_2 * PN_x * PN_x)
+        + (n_5over2 * PN_x_5over2)
+    )
+    den = 1.0 + (d_1 * PN_x) + (d_3over2 * PN_x_3over2)
+
+    # Ratio
+    ratio = num / den
+
+    # Final tidal phase calculation
+    tidal_phase *= ratio
+
+    return tidal_phase
+
+def get_nr_tuned_tidal_phase_taper(fHz, m1, m2, lambda1, lambda2):
+    """
+    Computes the NRTidalv1 model's tidal phase taper for a binary system with tuned parameters.
+
+    Parameters
+    ----------
+    fHz : jnp.array[float64]
+        Array of frequencies in Hertz at which to compute the tidal phase taper.
+    m1 : jnp.array[float64]
+        Mass of the first object in solar masses.
+    m2 : jnp.array[float64]
+        Mass of the second object in solar masses.
+    lambda1 : jnp.array[float64]
+        Tidal deformability parameter for the first object. Represents the tidal coupling strength.
+    lambda2 : jnp.array[float64]
+        Tidal deformability parameter for the second object. Represents the tidal coupling strength.
+
+    Returns
+    -------
+    tidal_phase_taper : jnp.array[float64]
+        Array of tidal phase taper values computed using the NRTidalv1 model. 
+    """
+
+    total_mass = m1 + m2
+    q = m1 / m2
+
+    # Xa and Xb are the masses normalized for total_mass = 1
+    Xa = m1 / total_mass
+    Xb = m2 / total_mass
+
+    kappa = get_kappa([m1, m2, lambda1, lambda2])
+    fHz_mrg = _get_merger_frequency(kappa, total_mass, q)
+
+    phi_tidal = get_tidal_phase(fHz, Xa, Xb, total_mass, kappa)
+    planck_taper = 1.0 - get_planck_taper(fHz, fHz_mrg)
+
+    return phi_tidal, planck_taper
 
 def PhenomPCoreTwistUp(
     fHz,
@@ -161,19 +259,64 @@ def PhenomPOneFrequencyWithTides(
     transition_freqs,
 ):
     """
-    m1, m2: in solar masses
-    phic: Orbital phase at the peak of the underlying non precessing model (rad)
-    M: Total mass (Solar masses)
+    Computes the gravitational waveform frequency domain representation for the PhenomP model, incorporating tidal effects.
+
+    Parameters
+    ----------
+    fs : jnp.array[float64]
+        Array of frequencies in Hertz at which to evaluate the waveform.
+
+    m1 : float
+        Mass of the first object in solar masses.
+
+    m2 : float
+        Mass of the second object in solar masses.
+
+    chi1 : float
+        Dimensionless spin parameter of the first object. Defines the spin orientation and magnitude.
+
+    chi2 : float
+        Dimensionless spin parameter of the second object. Defines the spin orientation and magnitude.
+
+    chip : float
+        Effective spin parameter, which combines the individual spins and their orientations relative to the orbital angular momentum.
+
+    lambda1 : float
+        Tidal deformability parameter for the first object. Represents the strength of the tidal interactions.
+
+    lambda2 : float
+        Tidal deformability parameter for the second object. Represents the strength of the tidal interactions.
+
+    phic : float
+        Coalescence phase of the binary system, which shifts the phase of the waveform.
+
+    M : float
+        Total mass of the binary system in solar masses.
+
+    dist_mpc : float
+        Distance to the binary system in megaparsecs.
+
+    coeffs : jnp.array[float64]
+        Coefficients used in the model to account for various waveform parameters and tidal effects.
+
+    transition_freqs : jnp.array[float64]
+        Array of transition frequencies that characterize the changes in the waveform model due to different physical effects.
+
+    Returns
+    -------
+    hPhenom : jnp.array[float64]
+        Gravitational waveform strain in the frequency domain, including tidal effects.
+    
+    dPhi : function
+        Derivative of the phase, used to compute the time shift 
     """
+
     # These are the parametrs that go into the waveform generator
     # Note that JAX does not give index errors, so if you pass in the
     # the wrong array it will behave strangely
     norm = 2.0 * jnp.sqrt(5.0 / (64.0 * jnp.pi))
     theta_ripple = jnp.array([m1, m2, chi1, chi2])
-    # coeffs = get_coeffs(theta_ripple)
-    # transition_freqs = phP_get_transition_frequencies(
-    #     theta_ripple, coeffs[5], coeffs[6], chip
-    # )
+
     # getting amplitude and phase terms
     ampTidal = 0.0 # unused
     phaseTidal, planckTaper = get_nr_tuned_tidal_phase_taper(
