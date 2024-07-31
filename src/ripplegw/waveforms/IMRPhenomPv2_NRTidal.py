@@ -7,7 +7,7 @@ import numpy as np
 from .IMRPhenomD import Phase as PhDPhase
 from .IMRPhenomD import Amp as PhDAmp
 from .IMRPhenomD_utils import get_coeffs
-from .NRTidal import get_nr_tuned_tidal_phase_taper, get_kappa2T, get_merger_frequency
+from .IMRPhenom_tidal_utils import get_nr_tuned_tidal_phase_taper, get_kappa, get_merger_frequency
 
 from ..typing import Array
 from .IMRPhenomPv2_utils import *
@@ -191,28 +191,6 @@ def PhenomPOneFrequencyWithTides(
     return hPhenom, Dphi
 
 
-# def PhenomPOneFrequency_phase(
-#     f: float,
-#     m1: float,
-#     m2: float,
-#     chi1: float,
-#     chi2: float,
-#     chip: float,
-#     phic: float,
-#     M: float,
-#     dist_mpc: float,
-# ):
-#     """ """
-#     theta_ripple = jnp.array([m1, m2, chi1, chi2])
-#     coeffs = get_coeffs(theta_ripple)
-#     transition_freqs = phP_get_transition_frequencies(
-#         theta_ripple, coeffs[5], coeffs[6], chip
-#     )
-
-#     phase = PhDPhase(f, theta_ripple, coeffs, transition_freqs)
-#     return -phase
-
-
 def gen_IMRPhenomPv2_NRTidal(
     fs: Array,
     theta: Array,
@@ -337,19 +315,11 @@ def gen_IMRPhenomPv2_NRTidal(
         epsilonNNLOoffset,
     )
 
-    # transition_freqs = list(transition_freqs)
     # for BNS the final frequency is not the same as BBHs
-    kappa2T = get_kappa2T(m1, m2, lambda1, lambda2)
+    kappa2T = get_kappa([m1, m2, lambda1, lambda2])
     f_merger = get_merger_frequency(kappa2T, M, q)
     f_final = f_merger
 
-    # unpack transition_freqs
-    # _, _, _, _, f_RD, _ = transition_freqs
-    # f_final = f_RD
-
-    # phi_IIb = lambda f: PhenomPOneFrequency_phase(
-    #     f, m2, m1, chi2_l, chi1_l, chip, phiRef, M, dist_mpc
-    # )
     t0 = jax.grad(phi_IIb)(f_final) / (2 * jnp.pi)
     phase_corr = jnp.cos(2 * jnp.pi * fs * (t0)) - 1j * jnp.sin(2 * jnp.pi * fs * (t0))
     M_s = (m1 + m2) * gt
