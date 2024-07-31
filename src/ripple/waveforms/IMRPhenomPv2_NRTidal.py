@@ -6,7 +6,8 @@ from ..constants import gt, MSUN
 import numpy as np
 from .IMRPhenomD import Phase as PhDPhase
 from .IMRPhenomD import Amp as PhDAmp
-from .IMRPhenomD_utils import get_coeffs
+from .IMRPhenomD_utils import get_coeffs, get_coeffs_nrtidal
+from .NRTidal import get_nr_tuned_tidal_phase_taper, get_kappa2T, get_merger_frequency
 
 from ..typing import Array
 from .IMRPhenomPv2_utils import *
@@ -144,6 +145,52 @@ def PhenomPOneFrequency(
     return hPhenom, Dphi
 
 
+def PhenomPOneFrequencyWithTides(
+    fs,
+    m1,
+    m2,
+    chi1,
+    chi2,
+    chip,
+    lambda1,
+    lambda2,
+    phic,
+    M,
+    dist_mpc,
+    coeffs,
+    transition_freqs,
+):
+    """
+    m1, m2: in solar masses
+    phic: Orbital phase at the peak of the underlying non precessing model (rad)
+    M: Total mass (Solar masses)
+    """
+    # These are the parametrs that go into the waveform generator
+    # Note that JAX does not give index errors, so if you pass in the
+    # the wrong array it will behave strangely
+    norm = 2.0 * jnp.sqrt(5.0 / (64.0 * jnp.pi))
+    theta_ripple = jnp.array([m1, m2, chi1, chi2])
+    # coeffs = get_coeffs(theta_ripple)
+    # transition_freqs = phP_get_transition_frequencies(
+    #     theta_ripple, coeffs[5], coeffs[6], chip
+    # )
+    # getting amplitude and phase terms
+    ampTidal = 0.0 # unused
+    phaseTidal, planckTaper = get_nr_tuned_tidal_phase_taper(
+        fs, m1, m2, lambda1, lambda2
+    )
+
+    phase = PhDPhase(fs, theta_ripple, coeffs, transition_freqs)
+    Dphi = lambda f: -PhDPhase(f, theta_ripple, coeffs, transition_freqs) - get_nr_tuned_tidal_phase_taper(f, m1, m2, lambda1, lambda2)[0] # - phic
+    phase -= phic
+
+    Amp = PhDAmp(fs, theta_ripple, coeffs, transition_freqs, D=dist_mpc) / norm
+
+    hPhenom = Amp * jnp.exp(-1j * (phase + phaseTidal)) * planckTaper
+
+    return hPhenom, Dphi
+
+
 # def PhenomPOneFrequency_phase(
 #     f: float,
 #     m1: float,
@@ -166,7 +213,7 @@ def PhenomPOneFrequency(
 #     return -phase
 
 
-def gen_IMRPhenomPv2(
+def gen_IMRPhenomPv2_NRTidal(
     fs: Array,
     theta: Array,
     f_ref: float,
@@ -175,17 +222,31 @@ def gen_IMRPhenomPv2(
     Thetas are waveform parameters.
     m1 must be larger than m2.
     """
-    m1, m2, s1x, s1y, s1z, s2x, s2y, s2z, dist_mpc, tc, phiRef, incl = theta
+    (
+        m1,
+        m2,
+        s1x,
+        s1y,
+        s1z,
+        s2x,
+        s2y,
+        s2z,
+        dist_mpc,
+        tc,
+        phiRef,
+        incl,
+        lambda1,
+        lambda2,
+    ) = theta
 
     # flip m1 m2. For some reason LAL uses this convention for PhenomPv2
     m1, m2 = m2, m1
+    lambda1, lambda2 = lambda2, lambda1
     s1x, s2x = s2x, s1x
     s1y, s2y = s2y, s1y
     s1z, s2z = s2z, s1z
     # from now on, m1 < m2
 
-    # m1_SI = m1 * MSUN
-    # m2_SI = m2 * MSUN
     (
         chi1_l,
         chi2_l,
@@ -235,15 +296,29 @@ def gen_IMRPhenomPv2(
     Y2 = [Y2m2, Y2m1, Y20, Y21, Y22]
 
     # Shift phase so that peak amplitude matches t = 0
+
+    # theta_intrinsic = jnp.array([m2, m1, chi2_l, chi1_l, lambda1, lambda2])
     theta_intrinsic = jnp.array([m2, m1, chi2_l, chi1_l])
     coeffs = get_coeffs(theta_intrinsic)
-
     transition_freqs = phP_get_transition_frequencies(
         theta_intrinsic, coeffs[5], coeffs[6], chip
     )
 
-    hPhenomDs, phi_IIb = PhenomPOneFrequency(
-        fs, m2, m1, chi2_l, chi1_l, chip, phic, M, dist_mpc, coeffs, transition_freqs
+
+    hPhenomDs, phi_IIb = PhenomPOneFrequencyWithTides(
+        fs,
+        m2,
+        m1,
+        chi2_l,
+        chi1_l,
+        chip,
+        lambda2,
+        lambda1,
+        phic,
+        M,
+        dist_mpc,
+        coeffs,
+        transition_freqs,
     )
 
     hp, hc = PhenomPCoreTwistUp(
@@ -261,13 +336,21 @@ def gen_IMRPhenomPv2(
         alphaNNLOoffset - alpha0,
         epsilonNNLOoffset,
     )
+
+    # transition_freqs = list(transition_freqs)
+    # for BNS the final frequency is not the same as BBHs
+    kappa2T = get_kappa2T(m1, m2, lambda1, lambda2)
+    f_merger = get_merger_frequency(kappa2T, M, q)
+    f_final = f_merger
+
     # unpack transition_freqs
-    _, _, _, _, f_RD, _ = transition_freqs
+    # _, _, _, _, f_RD, _ = transition_freqs
+    # f_final = f_RD
 
     # phi_IIb = lambda f: PhenomPOneFrequency_phase(
     #     f, m2, m1, chi2_l, chi1_l, chip, phiRef, M, dist_mpc
     # )
-    t0 = jax.grad(phi_IIb)(f_RD) / (2 * jnp.pi)
+    t0 = jax.grad(phi_IIb)(f_final) / (2 * jnp.pi)
     phase_corr = jnp.cos(2 * jnp.pi * fs * (t0)) - 1j * jnp.sin(2 * jnp.pi * fs * (t0))
     M_s = (m1 + m2) * gt
     phase_corr_tc = jnp.exp(-1j * fs * M_s * tc)
@@ -282,7 +365,7 @@ def gen_IMRPhenomPv2(
     return final_hp, final_hc
 
 
-def gen_IMRPhenomPv2_hphc(f: Array, params: Array, f_ref: float):
+def gen_IMRPhenomPv2_NRTidal_hphc(f: Array, params: Array, f_ref: float):
     """
     wrapper around gen_Pph but the first two parameters are Mc and eta
     instead of m1 and m2
@@ -304,7 +387,9 @@ def gen_IMRPhenomPv2_hphc(f: Array, params: Array, f_ref: float):
             params[9],
             params[10],
             params[11],
+            params[12],
+            params[13]
         ]
     )
-    hp, hc = gen_IMRPhenomPv2(f, m1m2params, f_ref)
+    hp, hc = gen_IMRPhenomPv2_NRTidal(f, m1m2params, f_ref)
     return hp, hc
