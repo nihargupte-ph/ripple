@@ -75,32 +75,6 @@ def get_tidal_phase(fHz, Xa, Xb, total_mass, kappa):
     return tidal_phase
 
 
-def get_merger_frequency(kappa2T, total_mass, q):
-    # Constants
-    a_0 = 0.3586
-    n_1 = 3.35411203e-2
-    n_2 = 4.31460284e-5
-    d_1 = 7.54224145e-2
-    d_2 = 2.23626859e-4
-
-    # Calculate kappa2T squared
-    kappa2T2 = kappa2T * kappa2T
-
-    # Numerator and denominator
-    num = 1.0 + n_1 * kappa2T + n_2 * kappa2T2
-    den = 1.0 + d_1 * kappa2T + d_2 * kappa2T2
-
-    # Q_0
-    Q_0 = a_0 / jnp.sqrt(q)
-
-    # Dimensionless angular frequency of merger
-    Momega_merger = Q_0 * (num / den)
-
-    # Convert to frequency in Hz
-    fHz_merger = Momega_merger / (jnp.pi * 2.0 * total_mass * gt)
-
-    return fHz_merger
-
 def get_nr_tuned_tidal_phase_taper(fHz, m1, m2, lambda1, lambda2):
     """
     Computes the NRTidalv1 model's tidal phase taper for a binary system with tuned parameters.
@@ -488,7 +462,7 @@ def gen_IMRPhenomPv2_NRTidal(
 
     # for BNS the final frequency is not the same as BBHs
     kappa = get_kappa([m1, m2, 0., 0., lambda1, lambda2])
-    f_merger = get_merger_frequency(kappa, M, q)
+    f_merger = _get_merger_frequency([m2, m1, 0, 0, 0, 0], kappa)
     f_final = f_merger
 
     t0 = jax.grad(phi_IIb)(f_final) / (2 * jnp.pi)
