@@ -1,6 +1,6 @@
 import jax
 import jax.numpy as jnp
-from ripple import Mc_eta_to_ms
+from ripplegw import Mc_eta_to_ms
 
 from ..constants import gt, MSUN
 import numpy as np
@@ -74,6 +74,33 @@ def get_tidal_phase(fHz, Xa, Xb, total_mass, kappa):
 
     return tidal_phase
 
+
+def get_merger_frequency(kappa2T, total_mass, q):
+    # Constants
+    a_0 = 0.3586
+    n_1 = 3.35411203e-2
+    n_2 = 4.31460284e-5
+    d_1 = 7.54224145e-2
+    d_2 = 2.23626859e-4
+
+    # Calculate kappa2T squared
+    kappa2T2 = kappa2T * kappa2T
+
+    # Numerator and denominator
+    num = 1.0 + n_1 * kappa2T + n_2 * kappa2T2
+    den = 1.0 + d_1 * kappa2T + d_2 * kappa2T2
+
+    # Q_0
+    Q_0 = a_0 / jnp.sqrt(q)
+
+    # Dimensionless angular frequency of merger
+    Momega_merger = Q_0 * (num / den)
+
+    # Convert to frequency in Hz
+    fHz_merger = Momega_merger / (jnp.pi * 2.0 * total_mass * gt)
+
+    return fHz_merger
+
 def get_nr_tuned_tidal_phase_taper(fHz, m1, m2, lambda1, lambda2):
     """
     Computes the NRTidalv1 model's tidal phase taper for a binary system with tuned parameters.
@@ -104,11 +131,12 @@ def get_nr_tuned_tidal_phase_taper(fHz, m1, m2, lambda1, lambda2):
     Xa = m1 / total_mass
     Xb = m2 / total_mass
 
-    kappa = get_kappa([m1, m2, lambda1, lambda2])
-    fHz_mrg = _get_merger_frequency(kappa, total_mass, q)
+
+    kappa = get_kappa([m1, m2, 0, 0, lambda1, lambda2])
+    fHz_mrg = _get_merger_frequency([m1, m2, 0, 0, 0, 0], kappa)
 
     phi_tidal = get_tidal_phase(fHz, Xa, Xb, total_mass, kappa)
-    planck_taper = 1.0 - get_planck_taper(fHz, fHz_mrg)
+    planck_taper = get_planck_taper(fHz, fHz_mrg)
 
     return phi_tidal, planck_taper
 
@@ -308,7 +336,8 @@ def PhenomPOneFrequencyWithTides(
         Gravitational waveform strain in the frequency domain, including tidal effects.
     
     dPhi : function
-        Derivative of the phase, used to compute the time shift 
+        Way to evaluate phase (including tides) at a particular point. We 
+        will take the derivative of this function later 
     """
 
     # These are the parametrs that go into the waveform generator
@@ -324,12 +353,11 @@ def PhenomPOneFrequencyWithTides(
     )
 
     phase = PhDPhase(fs, theta_ripple, coeffs, transition_freqs)
-    Dphi = lambda f: -PhDPhase(f, theta_ripple, coeffs, transition_freqs) - get_nr_tuned_tidal_phase_taper(f, m1, m2, lambda1, lambda2)[0] # - phic
+    Dphi = lambda f: -PhDPhase(f, theta_ripple, coeffs, transition_freqs) - get_nr_tuned_tidal_phase_taper(f, m1, m2, lambda1, lambda2)[0] 
     phase -= phic
 
     Amp = PhDAmp(fs, theta_ripple, coeffs, transition_freqs, D=dist_mpc) / norm
-
-    hPhenom = Amp * jnp.exp(-1j * (phase + phaseTidal)) * planckTaper
+    hPhenom = Amp * jnp.exp(-1j * (phase + phaseTidal)) * planckTaper 
 
     return hPhenom, Dphi
 
@@ -459,8 +487,8 @@ def gen_IMRPhenomPv2_NRTidal(
     )
 
     # for BNS the final frequency is not the same as BBHs
-    kappa2T = get_kappa([m1, m2, lambda1, lambda2])
-    f_merger = get_merger_frequency(kappa2T, M, q)
+    kappa = get_kappa([m1, m2, 0., 0., lambda1, lambda2])
+    f_merger = get_merger_frequency(kappa, M, q)
     f_final = f_merger
 
     t0 = jax.grad(phi_IIb)(f_final) / (2 * jnp.pi)
