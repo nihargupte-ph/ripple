@@ -9,6 +9,7 @@ from .IMRPhenomD import Amp as PhDAmp
 from .IMRPhenomD_utils import get_coeffs
 from .IMRPhenomD_NRTidalv2 import get_planck_taper, _get_merger_frequency
 from .IMRPhenom_tidal_utils import get_kappa
+from .IMRPhenomPv2 import PhenomPCoreTwistUp
 
 from ..typing import Array
 from .IMRPhenomPv2_utils import *
@@ -113,107 +114,6 @@ def get_nr_tuned_tidal_phase_taper(fHz, m1, m2, lambda1, lambda2):
     planck_taper = get_planck_taper(fHz, fHz_mrg)
 
     return phi_tidal, planck_taper
-
-def PhenomPCoreTwistUp(
-    fHz,
-    hPhenom,
-    # phase,
-    # Amp,
-    eta,
-    chi1_l,
-    chi2_l,
-    chip,
-    M,
-    angcoeffs,
-    Y2m,
-    alphaoffset,
-    epsilonoffset,
-):
-    assert angcoeffs is not None
-    assert Y2m is not None
-
-    # here it is used to be LAL_MTSUN_SI
-    f = fHz * gt * M  # Frequency in geometric units
-    q = (1.0 + jnp.sqrt(1.0 - 4.0 * eta) - 2.0 * eta) / (2.0 * eta)
-    m1 = 1.0 / (1.0 + q)  # Mass of the smaller BH for unit total mass M=1.
-    m2 = q / (1.0 + q)  # Mass of the larger BH for unit total mass M=1.
-    Sperp = chip * (
-        m2 * m2
-    )  # Dimensionfull spin component in the orbital plane. S_perp = S_2_perp
-    # chi_eff = m1 * chi1_l + m2 * chi2_l  # effective spin for M=1
-
-    SL = chi1_l * m1 * m1 + chi2_l * m2 * m2  # Dimensionfull aligned spin.
-
-    omega = jnp.pi * f
-    logomega = jnp.log(omega)
-    omega_cbrt = (omega) ** (1 / 3)
-    omega_cbrt2 = omega_cbrt * omega_cbrt
-
-    alpha = (
-        angcoeffs["alphacoeff1"] / omega
-        + angcoeffs["alphacoeff2"] / omega_cbrt2
-        + angcoeffs["alphacoeff3"] / omega_cbrt
-        + angcoeffs["alphacoeff4"] * logomega
-        + angcoeffs["alphacoeff5"] * omega_cbrt
-    ) - alphaoffset
-
-    epsilon = (
-        angcoeffs["epsiloncoeff1"] / omega
-        + angcoeffs["epsiloncoeff2"] / omega_cbrt2
-        + angcoeffs["epsiloncoeff3"] / omega_cbrt
-        + angcoeffs["epsiloncoeff4"] * logomega
-        + angcoeffs["epsiloncoeff5"] * omega_cbrt
-    ) - epsilonoffset
-
-    # print("alpha, epsilon: ", alpha, epsilon)
-    cBetah, sBetah = WignerdCoefficients(omega_cbrt, SL, eta, Sperp)
-
-    cBetah2 = cBetah * cBetah
-    cBetah3 = cBetah2 * cBetah
-    cBetah4 = cBetah3 * cBetah
-    sBetah2 = sBetah * sBetah
-    sBetah3 = sBetah2 * sBetah
-    sBetah4 = sBetah3 * sBetah
-
-    # d2 = jnp.array(
-    #     [
-    #         sBetah4,
-    #         2 * cBetah * sBetah3,
-    #         jnp.sqrt(6) * sBetah2 * cBetah2,
-    #         2 * cBetah3 * sBetah,
-    #         cBetah4,
-    #     ]
-    # )
-    Y2mA = jnp.array(Y2m)  # need to pass Y2m in a 5-component list
-    hp_sum = 0
-    hc_sum = 0
-
-    cexp_i_alpha = jnp.exp(1j * alpha)
-    cexp_2i_alpha = cexp_i_alpha * cexp_i_alpha
-    cexp_mi_alpha = 1.0 / cexp_i_alpha
-    cexp_m2i_alpha = cexp_mi_alpha * cexp_mi_alpha
-    T2m = (
-        cexp_2i_alpha * cBetah4 * Y2mA[0]
-        - cexp_i_alpha * 2 * cBetah3 * sBetah * Y2mA[1]
-        + 1 * jnp.sqrt(6) * sBetah2 * cBetah2 * Y2mA[2]
-        - cexp_mi_alpha * 2 * cBetah * sBetah3 * Y2mA[3]
-        + cexp_m2i_alpha * sBetah4 * Y2mA[4]
-    )
-    Tm2m = (
-        cexp_m2i_alpha * sBetah4 * jnp.conjugate(Y2mA[0])
-        + cexp_mi_alpha * 2 * cBetah * sBetah3 * jnp.conjugate(Y2mA[1])
-        + 1 * jnp.sqrt(6) * sBetah2 * cBetah2 * jnp.conjugate(Y2mA[2])
-        + cexp_i_alpha * 2 * cBetah3 * sBetah * jnp.conjugate(Y2mA[3])
-        + cexp_2i_alpha * cBetah4 * jnp.conjugate(Y2mA[4])
-    )
-    hp_sum = T2m + Tm2m
-    hc_sum = 1j * (T2m - Tm2m)
-    eps_phase_hP = jnp.exp(-2j * epsilon) * hPhenom / 2.0
-
-    hp = eps_phase_hP * hp_sum
-    hc = eps_phase_hP * hc_sum
-
-    return hp, hc
 
 
 def PhenomPOneFrequency(
